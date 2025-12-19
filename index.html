@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>什刹海 · 智能导览系统</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: '9c788ecfb3221cdc8390da98c8fc872f'
+        };
+    </script>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=8a7f84330ba776e17c18394547892d50"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: "Microsoft YaHei", sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        
+        #vr-container {
+            flex: 1.5;
+            position: relative;
+            background: #000;
+            transition: flex 0.3s;
+        }
+        
+        a-scene { width: 100%; height: 100%; }
+        
+        #vr-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 100; color: white; transition: opacity 0.5s;
+        }
+        #vr-overlay.hidden { opacity: 0; pointer-events: none; }
+        
+        .start-btn {
+            padding: 15px 40px; border: 2px solid #4CC3D9; border-radius: 30px;
+            background: transparent; color: white; font-size: 18px; cursor: pointer;
+            transition: 0.3s; text-transform: uppercase; letter-spacing: 2px;
+            margin-top: 20px;
+        }
+        .start-btn:hover { background: #4CC3D9; color: black; box-shadow: 0 0 15px #4CC3D9; }
+        
+        #sidebar {
+            flex: 1;
+            display: none; flex-direction: column;
+            background: #f0f8ff; 
+            border-left: 1px solid #ccc;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            position: relative; z-index: 50;
+            border-radius: 10px 0 0 10px; 
+        }
+        
+        .header-bar {
+            padding: 15px 20px; background: #2c3e50; color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+        }
+        .header-bar h1 { margin: 0; font-size: 18px; }
+        .header-bar h1::before { content: '🧭 '; font-size: 20px; }
+        
+        .info-panel {
+            padding: 20px;
+            background: #ffffff;
+            border-bottom: 1px solid #eee;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin: 10px;
+        }
+        .info-panel h2 { margin: 0 0 10px 0; font-size: 22px; color: #333; }
+        .info-panel p { margin: 0 0 15px 0; color: #666; font-size: 14px; line-height: 1.6; }
+        
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        
+        .nav-btn, .audio-btn, .auto-tour-btn {
+            border: none;
+            padding: 8px 14px; border-radius: 20px;
+            font-size: 13px; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 4px;
+            transition: background 0.3s, transform 0.2s;
+            color: white;
+        }
+        .nav-btn { background-color: #4285f4; }
+        .nav-btn:hover { background-color: #3367d6; transform: scale(1.05); }
+        
+        .audio-btn { background-color: #ff9800; }
+        .audio-btn:hover { background-color: #f57c00; transform: scale(1.05); }
+        .audio-btn.playing { background-color: #e91e63; } 
+
+        .auto-tour-btn { background-color: #4caf50; }
+        .auto-tour-btn:hover { background-color: #43a047; transform: scale(1.05); }
+        .auto-tour-btn.active { background-color: #2e7d32; box-shadow: 0 0 8px rgba(76, 175, 80, 0.6); animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+        }
+
+        #amap-container {
+            flex: 1; 
+            width: 100%;
+            background: #e6e6e6;
+            position: relative;
+            border-bottom-left-radius: 10px; 
+            border-bottom-right-radius: 10px;
+        }
+        .custom-marker {
+            background-color: white;
+            border: 2px solid #333;
+            border-radius: 50% 50% 50% 0;
+            width: 24px; height: 24px;
+            transform: rotate(-45deg);
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; transition: 0.3s;
+        }
+        .custom-marker::after {
+            content: ''; width: 14px; height: 14px; background: #666; border-radius: 50%;
+        }
+        .custom-marker:hover { transform: rotate(-45deg) scale(1.2); border-color: #4CC3D9; }
+        .custom-marker.active { background-color: #FF4D4F; border-color: #FF4D4F; }
+        .custom-marker.active::after { background: white; }
+        
+        .custom-info-window {
+            pointer-events: none; 
+            position: absolute;
+            background: rgba(0,0,0,0.75);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transform: translate(-50%, -100%);
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 9999;
+        }
+        .custom-info-window::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -6px;
+            border: 6px solid transparent;
+            border-top-color: rgba(0,0,0,0.75);
+        }
+        .custom-info-window img {
+            width: 120px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-top: 6px;
+            display: block;
+        }
+        .custom-info-window.show { opacity: 1; }
+        
+        #fullscreen-btn {
+            position: absolute; bottom: 10px; right: 10px; z-index: 10; display: none;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: none;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #fullscreen-btn:hover { background: rgba(0,0,0,0.8); }
+
+        .intro-image {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: -1; cursor: pointer;
+            transition: box-shadow 0.3s, transform 0.3s;
+        }
+        .intro-image:hover {
+            box-shadow: 0 0 20px rgba(76, 195, 217, 0.8);
+            transform: scale(1.05);
+        }
+
+        /* ---------------------------------------------------- */
+        /* 🔥 核心适配代码：手机/平板端样式 (屏幕宽度小于768px时生效) */
+        /* ---------------------------------------------------- */
+        @media screen and (max-width: 768px) {
+            /* 1. 改变整体布局为垂直排列 (上VR，下地图) */
+            body {
+                flex-direction: column;
+            }
+
+            /* 2. VR 容器占据上半部分 (60%高度) */
+            #vr-container {
+                flex: none; /* 禁用flex自动缩放 */
+                height: 60vh; 
+                width: 100%;
+            }
+
+            /* 3. 侧边栏/地图占据下半部分 (40%高度) */
+            #sidebar {
+                flex: none;
+                height: 40vh;
+                width: 100%;
+                border-left: none; /* 去掉左边框 */
+                border-top: 4px solid #2c3e50; /* 顶部加个分割线 */
+                border-radius: 0; /* 去掉圆角，贴合屏幕 */
+                margin: 0; /* 重置边距 */
+            }
+            
+            /* 4. 调整信息面板，减少手机上的留白 */
+            .info-panel {
+                margin: 0;
+                border-radius: 0;
+                padding: 10px 15px;
+                box-shadow: none;
+                border-bottom: 1px solid #ddd;
+            }
+
+            /* 5. 调整标题字号 */
+            .info-panel h2 {
+                font-size: 18px;
+                margin-bottom: 5px;
+            }
+            .info-panel p {
+                font-size: 12px;
+                margin-bottom: 10px;
+                display: -webkit-box;
+                -webkit-line-clamp: 2; /* 限制文字行数，防止占太多地 */
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            /* 6. 按钮栏适配：让按钮更好按 */
+            .btn-group {
+                justify-content: space-between;
+            }
+            .nav-btn, .audio-btn, .auto-tour-btn {
+                padding: 8px 10px;
+                font-size: 12px;
+                flex: 1; /* 按钮平分宽度 */
+                justify-content: center;
+            }
+
+            /* 7. 隐藏手机上的全屏按钮 (容易误触且不需要) */
+            #fullscreen-btn {
+                display: none !important;
+            }
+
+            /* 8. 调整开始页面的布局 */
+            #vr-overlay h2 {
+                font-size: 20px;
+                margin-bottom: 10px;
+            }
+            .start-btn {
+                padding: 10px 30px;
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="vr-container">
+    <div id="vr-overlay">
+        <h2>什刹海前海 · 沉浸式游览</h2>
+        <img id="intro-image" class="intro-image" src="white.jpg" alt="欢迎图片" onclick="startTour()">
+        <button class="start-btn" id="start-btn">开启游览</button>
+    </div>
+    <button id="fullscreen-btn">🔍 全屏</button>
+</div>
+<div id="sidebar">
+    <div class="header-bar">
+        <h1>导览地图</h1>
+    </div>
+    <div class="info-panel">
+        <h2 id="scene-title">准备中...</h2>
+        <p id="scene-desc">点击地图上的标记点开始探索。</p>
+        <div class="btn-group">
+            <button class="auto-tour-btn" id="auto-tour-btn" onclick="toggleAutoTour()">▶ 开启自动导览</button>
+            <button class="audio-btn" id="audio-control-btn" onclick="toggleSpeech()">🔊 听讲解</button>
+            <button class="nav-btn" onclick="openNavigation()">📍 导航前往</button>
+        </div>
+    </div>
+    <div id="amap-container"></div>
+</div>
+<script>
+// 1. 定义游览顺序
+const tourSequence = [
+    "scene_shicha", "scene_538", "scene_539", "scene_002", "scene_003", 
+    "scene_004", "scene_005", "scene_007", "scene_008", "scene_011", 
+    "scene_012", "scene_013", "scene_014", "scene_015"
+];
+
+const tourData = { 
+    "scene_shicha": {
+        title: "荷花市场南门",
+        description: "大家请看，我们现在所处的位置就是荷花市场南门。头顶这座古色古香的牌楼，标志着我们正式进入了前海景区。历史上，这里是清末民初北京最热闹的消夏场所，因湖中荷花盛开而得名。每到夏天，这里搭棚售货，杂耍献艺，是老北京人最爱的“夏日游乐场”。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/shicha1.mp4",
+        lnglat: [116.3909,39.93593],
+        previewImg: "northgate.jpg",
+        hotspots: [{ targetScene: "scene_538", position: "0 0 -10" }]
+    },
+    "scene_538": {
+        title: "环湖绿道",
+        description: "穿过牌楼，我们漫步在环湖绿道上。什刹海的标志就是这些依依垂柳，老舍先生笔下的北京之美，这里占了一大半。右手边是碧波荡漾的前海，左手边是青砖灰瓦的建筑。大家可以深呼吸一下，这里的空气中都透着一股清凉的水汽。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/test.mp4",
+        lnglat: [116.391002,39.936523],
+        previewImg: "green.jpg",
+        hotspots: [{ targetScene: "scene_shicha", position: "0 0 10" }, { targetScene: "scene_539", position: "10 0 0" }, { targetScene: "scene_001", position: "-10 0 0" }]
+    },
+    "scene_539": {
+        title: "近王府廊桥",
+        description: "前方这段栈道和连廊，我们称之为近王府廊桥。为什么叫“近王府”呢？因为这附近坐落着著名的恭王府。站在廊桥之上，建筑风格明显带有皇家园林的精致与气派。这里是拍照的绝佳点位，背景是开阔的湖面和远处的钟鼓楼，非常出片。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/5.mp4",
+        lnglat: [116.391988,39.936933],
+        previewImg: "wfbri.jpg",
+        hotspots: [{ targetScene: "scene_538", position: "-10 0 0" }, { targetScene: "scene_015", position: "0 0 -10" }]
+    },
+    "scene_002": {
+        title: "王府的礼物",
+        description: "如果大家想带点有“皇气”的纪念品，这家“王府的礼物”不容错过。这里集合了许多富有北京特色的文创产品，从精致的御扇到呆萌的石狮子摆件，将传统的王府文化变得年轻有趣。大家可以进去逛逛，盖个章，留个纪念。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/6.mp4",
+        lnglat: [116.393583,39.937504],
+        previewImg: "wf.jpg",
+        hotspots: [{ targetScene: "scene_538", position: "0 0 10" }, { targetScene: "scene_003", position: "0 0 -10" }]
+    },
+    "scene_003": {
+        title: "前海小吃街",
+        description: "闻到香味了吗？我们来到了前海小吃街。这里汇聚了冰糖葫芦、爆肚、炸酱面等各种老北京特色。虽然现在为了环保整治了油烟，但那种热闹的市井烟火气依然浓郁。手里拿串糖葫芦，边走边吃，这才是逛什刹海的正确姿势。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/7.mp4",
+        lnglat: [116.393897,39.938047],
+        previewImg: "xcj.jpg",
+        hotspots: [{ targetScene: "scene_002", position: "0 0 10" }, { targetScene: "scene_004", position: "0 0 -10" }]
+    },
+    "scene_004": {
+        title: "前海酒吧街",
+        description: "沿着湖边继续走，这一排风格各异的建筑就是著名的前海酒吧街。白天这里相对安静，充满了文艺气息；而到了夜晚，霓虹闪烁，歌声悠扬，这里是北京夜生活的地标，也是许多民谣歌手的摇篮。古典的什刹海在这里与现代时尚完美融合。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/8.mp4",
+        lnglat: [116.393751,39.938504],
+        previewImg: "bar.jpg",
+        hotspots: [{ targetScene: "scene_003", position: "0 0 10" }, { targetScene: "scene_005", position: "0 0 -10" }]
+    },
+    "scene_005": {
+        title: "银锭桥",
+        description: "各位，我们现在正站在整个什刹海最著名的银锭桥上。这座形似元宝的石桥，是前海和后海的分界线。这里有一个著名的景观叫“银锭观山”——在过去没有高楼遮挡且天气晴朗时，向西眺望，可以清晰地看到西山。这里也是连接皇城与市井的咽喉要道。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/10.mp4",
+        lnglat: [116.393414,39.938948],
+        previewImg: "ydbri.jpg",
+        hotspots: [{ targetScene: "scene_004", position: "0 0 10" }, { targetScene: "scene_006", position: "0 0 -10" }]
+    },
+    "scene_007": {
+        title: "饭庄休息区",
+        description: "过了桥，这一带是饭庄休息区。这里聚集了如“庆云楼”等百年老字号。大家走累了，可以在这里稍作休息。坐在临窗的位置，一边品尝京味美食，一边欣赏窗外的游船和流水，别有一番风味。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/13.mp4",
+        lnglat: [116.393767,39.938994444],
+        previewImg: "hotel.jpg",
+        hotspots: [{ targetScene: "scene_005", position: "0 0 10" }, { targetScene: "scene_008", position: "0 0 -10" }]
+    },
+    "scene_008": {
+        title: "地百游船码头",
+        description: "前方这个码头是地百游船码头，紧邻地安门百货商场。什刹海曾是元代大运河漕运的终点码头，虽然现在没有了运粮船，但保留了游船文化。从这里登船，换个角度看两岸垂柳拂面，会更能体会到“船在水中走，人在画中游”的意境。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/14.mp4",
+        lnglat: [116.394819,39.938144],
+        previewImg: "mt.jpg",
+        hotspots: [{ targetScene: "scene_007", position: "0 0 10" }, { targetScene: "scene_011", position: "0 0 -10" }]
+    },
+    "scene_011": {
+        title: "步行街",
+        description: "我们现在转入连接景区的步行街。这里人山人海，是北京中轴线旁的重要商业街区。两侧店铺林立，既有时尚潮牌，也有传统丝绸、布鞋店，展现了北京作为国际大都市的繁华一面。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/15.mp4",
+        lnglat: [116.395158,39.936207],
+        previewImg: "street.jpg",
+        hotspots: [{ targetScene: "scene_08", position: "0 0 10" }, { targetScene: "scene_012", position: "0 0 -10" }]
+    },
+    "scene_012": {
+        title: "步行街深处",
+        description: "让我们往步行街深处走一走。避开主路的喧嚣，这里更贴近老百姓的生活。偶尔能看到老北京的四合院门楼，听到大爷大妈的闲聊声。这里藏着北京城的“里子”，安静而祥和。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/16.mp4",
+        lnglat: [116.39365,39.935481],
+        previewImg: "last.jpg",
+        hotspots: [{ targetScene: "scene_011", position: "0 0 10" }, { targetScene: "scene_013", position: "0 0 -10" }]
+    },
+    "scene_013": {
+        title: "平安码头",
+        description: "绕回到湖边，我们来到了平安码头。“平安”二字，寄托了人们美好的祝愿。这里的视野非常开阔，也是观赏前海全景的好地方。大家可以在这里合影留念，把“平安”带回家。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/17.mp4",
+        lnglat: [116.392756,39.934314],
+        previewImg: "ddmatou.jpg",
+        hotspots: [{ targetScene: "scene_012", position: "0 0 10" }, { targetScene: "scene_014", position: "0 0 -10" }]
+    },
+    "scene_014": {
+        title: "前海拱桥",
+        description: "前方这座优美的前海拱桥，如同一道长虹卧波。它的石拱曲线与水中的倒影相映成趣，形成了一个完美的圆形。无论是在桥上走，还是在远处看，它都是前海画卷中点睛的一笔。",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/18.mp4",
+        lnglat: [116.392244,39.933643],
+        previewImg: "bri.jpg",
+        hotspots: [{ targetScene: "scene_013", position: "0 0 10" }, { targetScene: "scene_015", position: "0 0 -10" }]
+    },
+    "scene_015": {
+        title: "荷花市场一条街",
+        description: "最后，我们回到了荷花市场一条街的主街。这条街位于什刹海前海的西岸，全长约280米，是老北京消夏胜地的代表。什刹海，又称后海，包括前海、后海和西海，是元代大运河的起点，水域宽阔，湖光山色宜人。荷花市场兴起于20世纪20年代，那时这里是售卖鲜荷、冰碗等食品的摊点，还有各种游艺场所，成为平民百姓避暑的好去处。让我们从历史说起。早在晚清时期，什刹海就被称为“河沿”，每到夏季，荷花盛开，文人雅士和仕女们纷至沓来。1906年的《燕京岁时记》记载，这里荷花茂盛，吸引无数游客。到了民国年间，市场达到鼎盛，中央堤坝上摊位林立，南半部是食品摊，北半部是茶馆和杂耍表演。想象一下，夏夜里，柳树婆娑，荷香扑鼻，游客们品尝着凉粉、酸梅汤、新鲜莲藕、水菱角和菱角，边吃边听戏曲、看武术，热闹非凡。东岸的小街头公园曾是马戏和武术的场地，北岸有歌剧和小吃摊，甚至有捏面人、编草艺的匠人。著名的会仙堂餐厅，就在这里供应山东菜，如荷叶粥、莲子酿鸭等，用湖中鲜货烹饪，吸引了梅兰芳等名角前来。 老舍先生在作品中也描绘过这里：坐在柳荫下喝茶，吃酸梅糕，或品八宝莲叶粥，钓鱼、游泳，其乐融融。如今，经过2017年的调整和升级，荷花市场重获新生。酒吧街转型为宁静文艺的步行街，建筑风格多样，有的仿古雕梁画栋，有的保留老北京灰砖瓦，地面井盖上刻着精美的莲花图案。漫步街头，你会看到红栏杆、秋荷残梗，偶尔有野鸭嬉水。夏季荷花绽放，倒映湖中，远处鼓楼巍峨，天气好时还能遥望西山。街边店铺门头古朴，出售文创、手工艺品和小吃，不再喧闹，而是充满诗意。什刹海荷花市场不仅是景点，更是老北京生活的缩影。古典与现代相融，自然与人文辉映。希望大家在这里度过愉快时光，导游到此结束，希望大家玩得开心！",
+        videoSrc: "https://my-vr-tour-video.oss-cn-beijing.aliyuncs.com/19.mp4",
+        lnglat: [116.39127,39.93486],
+        previewImg: "hh.jpg",
+        hotspots: [{ targetScene: "scene_014", position: "0 0 10" }, { targetScene: "scene_539", position: "0 0 -10" }]
+    }
+};
+
+let currentSceneId = "scene_shicha";
+let map = null;
+let markers = {};
+let videoEl = null; 
+let hotspotsContainer = null; 
+let mainSphere = null; 
+const overlayEl = document.querySelector('#vr-overlay');
+const startBtn = document.querySelector('#start-btn');
+const uiTitle = document.getElementById('scene-title');
+const uiDesc = document.getElementById('scene-desc');
+const audioBtn = document.getElementById('audio-control-btn');
+const autoTourBtn = document.getElementById('auto-tour-btn');
+const sidebar = document.getElementById('sidebar'); // 侧边栏
+const vrContainer = document.getElementById('vr-container'); // VR容器
+
+// --- 音频变量 ---
+let synth = window.speechSynthesis;
+let currentAudio = null; // 控制MP3
+let currentUtterance = null; // 控制机器音
+let isSpeaking = false;
+let isAutoTouring = false;
+let autoTourTimer = null;
+let selectedVoice = null; 
+
+// --- 初始化系统语音列表（作为MP3失败的备选） ---
+function initVoices() {
+    const voices = synth.getVoices();
+    selectedVoice = voices.find(v => v.lang.includes('zh') && v.name.includes('Google')) ||
+                    voices.find(v => v.lang.includes('zh') && v.name.includes('Microsoft')) ||
+                    voices.find(v => v.lang.includes('zh'));
+}
+if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = initVoices;
+}
+initVoices();
+
+startBtn.addEventListener('click', () => {
+    overlayEl.classList.add('hidden');
+    
+    // 初始化 A-Scene (性能优化核心)
+    const sceneEl = document.createElement('a-scene');
+    sceneEl.setAttribute('embedded', '');
+    sceneEl.setAttribute('loading-screen', 'dotsColor: white; backgroundColor: black');
+    sceneEl.setAttribute('xr-mode-ui', 'enabled: false'); 
+    // 🔥 优化1：关闭抗锯齿，降低精度，极大提升流畅度
+    sceneEl.setAttribute('renderer', 'antialias: false; precision: mediump; sortObjects: false;');
+    
+    sceneEl.innerHTML = `
+        <a-assets>
+            <video id="my360video" src="" loop crossorigin="anonymous" playsinline webkit-playsinline></video>
+            <a-mixin id="hotspot-mixin" geometry="primitive: circle; radius: 1" material="color: white; opacity: 0.3; shader: flat" animation__scale="property: scale; to: 1.2 1.2 1; dir: alternate; loop: true; dur: 1000"></a-mixin>
+        </a-assets>
+        <a-videosphere id="main-sphere" src="#my360video" rotation="0 -90 0" visible="false"></a-videosphere>
+        <a-entity id="hotspots-container"></a-entity>
+        <a-camera id="cam" look-controls="enabled: true">
+            <a-cursor material="opacity: 0" geometry="primitive: ring; radiusInner:0; radiusOuter:0" raycaster="objects: .hotspot"></a-cursor>
+        </a-camera>
+    `;
+    vrContainer.appendChild(sceneEl);
+
+    // 🔥 优化2：强制限制像素比，防止4K屏卡死
+    sceneEl.addEventListener('loaded', () => {
+        const renderer = sceneEl.renderer;
+        if (renderer) {
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        }
+    });
+    
+    videoEl = document.querySelector('#my360video');
+    hotspotsContainer = document.querySelector('#hotspots-container');
+    mainSphere = document.getElementById('main-sphere');
+    
+    initVR();
+    
+    setTimeout(() => {
+        initMap();
+    }, 100);
+    document.getElementById('sidebar').style.display = 'flex';
+    
+    initFullscreenLogic();
+
+    // 默认开启自动导览模式
+    isAutoTouring = true;
+    updateAutoTourBtnStyle();
+    speakDescription(tourData[currentSceneId].description);
+});
+
+function startTour() {
+    startBtn.click();
+}
+
+function initVR() {
+    videoEl.muted = false; 
+    loadScene(currentSceneId, true);
+}
+
+// --- 全屏逻辑优化 (解决卡顿) ---
+function initFullscreenLogic() {
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    fullscreenBtn.style.display = 'block';
+    
+    fullscreenBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen();
+            } else if (document.documentElement.webkitRequestFullscreen) {
+                document.documentElement.webkitRequestFullscreen();
+            }
+        } else {
+            if (document.exitFullscreen) document.exitFullscreen();
+        }
+    });
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+}
+
+function handleFullscreenChange() {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+        // 🔥 优化3：全屏时隐藏侧边栏和地图，释放显卡资源
+        sidebar.style.display = 'none'; 
+        vrContainer.style.flex = '1'; 
+        vrContainer.style.width = '100vw';
+        vrContainer.style.height = '100vh';
+        const scene = document.querySelector('a-scene');
+        if(scene) scene.resize();
+    } else {
+        // 恢复
+        // 注意：这里需要根据当前屏幕宽度决定恢复成什么样，但CSS已经处理了flex，这里只需要恢复display
+        sidebar.style.display = 'flex'; 
+        // 恢复flex值，这里重置为空，让CSS控制
+        vrContainer.style.flex = '';
+        vrContainer.style.width = '';
+        vrContainer.style.height = ''; 
+        
+        // 强制触发一次重绘
+        if(window.innerWidth > 768) {
+            vrContainer.style.flex = '1.5';
+        }
+        
+        const scene = document.querySelector('a-scene');
+        if(scene) scene.resize();
+        if (map) map.resize(); 
+    }
+}
+
+// --- 语音播放核心 (MP3优先 -> 失败转机器音) ---
+function speakDescription(text) {
+    // 停止所有声音
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    if (synth.speaking) { synth.cancel(); }
+
+    if (!text) {
+        resetAudioState();
+        return;
+    }
+
+    // 尝试播放MP3
+    const audioPath = 'audio/' + currentSceneId + '.mp3';
+    console.log("尝试播放:", audioPath);
+
+    currentAudio = new Audio(audioPath);
+    
+    // 监听播放成功
+    currentAudio.onplay = () => {
+        isSpeaking = true;
+        updateAudioBtnStyle();
+        if(videoEl) videoEl.muted = true;
+    };
+
+    // 播放结束
+    currentAudio.onended = () => {
+        resetAudioState();
+        handleAutoTourJump();
+    };
+
+    // 🔥 关键：MP3加载失败（如未下载），自动转机器音
+    currentAudio.onerror = () => {
+        console.warn("MP3未找到，降级使用机器语音");
+        currentAudio = null;
+        fallbackToRobotVoice(text);
+    };
+
+    // 尝试播放
+    const playPromise = currentAudio.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(e => {
+            console.log("MP3播放被阻拦或失败，尝试机器音");
+            fallbackToRobotVoice(text);
+        });
+    }
+}
+
+// 兜底机器音方案
+function fallbackToRobotVoice(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 1;
+    if (selectedVoice) utterance.voice = selectedVoice;
+
+    utterance.onstart = () => {
+        isSpeaking = true;
+        updateAudioBtnStyle();
+        if(videoEl) videoEl.muted = true;
+    };
+    utterance.onend = () => {
+        resetAudioState();
+        handleAutoTourJump();
+    };
+    utterance.onerror = () => resetAudioState();
+    
+    currentUtterance = utterance;
+    synth.speak(utterance);
+}
+
+function handleAutoTourJump() {
+    if (isAutoTouring) {
+        console.log("语音结束，准备跳转...");
+        autoTourTimer = setTimeout(() => {
+            if(isAutoTouring) playNextSceneInSequence();
+        }, 3000);
+    }
+}
+
+function playNextSceneInSequence() {
+    const currentIndex = tourSequence.indexOf(currentSceneId);
+    if (currentIndex !== -1 && currentIndex < tourSequence.length - 1) {
+        loadScene(tourSequence[currentIndex + 1], true); 
+    } else {
+        stopAutoTour();
+        alert("🎉 全程导览结束！");
+    }
+}
+
+function resetAudioState() {
+    isSpeaking = false;
+    updateAudioBtnStyle();
+    if(videoEl) videoEl.muted = false;
+}
+
+// --- 交互控制 ---
+function toggleAutoTour() {
+    if (isAutoTouring) {
+        stopAutoTour();
+    } else {
+        isAutoTouring = true;
+        if (!isSpeaking) speakDescription(tourData[currentSceneId].description);
+    }
+    updateAutoTourBtnStyle();
+}
+
+function stopAutoTour() {
+    isAutoTouring = false;
+    if (autoTourTimer) clearTimeout(autoTourTimer);
+    updateAutoTourBtnStyle();
+}
+
+function updateAutoTourBtnStyle() {
+    const btn = document.getElementById('auto-tour-btn');
+    if (isAutoTouring) {
+        btn.innerHTML = '⏸ 自动导览中...';
+        btn.classList.add('active');
+    } else {
+        btn.innerHTML = '▶ 开启自动导览';
+        btn.classList.remove('active');
+    }
+}
+
+function toggleSpeech() {
+    if (isSpeaking) {
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        if (synth.speaking) { synth.cancel(); }
+        resetAudioState();
+        stopAutoTour();
+    } else {
+        speakDescription(tourData[currentSceneId].description);
+    }
+}
+
+function updateAudioBtnStyle() {
+    const btn = document.getElementById('audio-control-btn');
+    if (isSpeaking) {
+        btn.innerHTML = '⏹ 停止讲解';
+        btn.classList.add('playing');
+    } else {
+        btn.innerHTML = '🔊 听讲解';
+        btn.classList.remove('playing');
+    }
+}
+
+// --- 场景加载与地图 ---
+function loadScene(id, isSystemJump = false) {
+    if (!isSystemJump) stopAutoTour();
+
+    const data = tourData[id];
+    if (mainSphere) mainSphere.setAttribute('visible', false);
+    
+    videoEl.pause();
+    videoEl.src = data.videoSrc;
+    // 🔥 优化4：移除强制修改video宽高的代码，避免内存波动
+    
+    videoEl.load();
+    videoEl.onloadeddata = () => {
+        if (mainSphere) mainSphere.setAttribute('visible', true);
+        if (overlayEl.classList.contains('hidden')) {
+            videoEl.play().catch(e => console.error("Video Autoplay Blocked", e));
+        }
+    };
+    
+    uiTitle.innerText = data.title;
+    uiDesc.innerText = data.description;
+    
+    if (overlayEl.classList.contains('hidden')) {
+        speakDescription(data.description);
+    }
+
+    renderVRHotspots(data.hotspots);
+    updateMapHighlight(id);
+    if (map) map.panTo(data.lnglat);
+    currentSceneId = id;
+}
+
+// --- 地图部分保持不变 ---
+function createInfoWindow() {
+    const div = document.createElement('div');
+    div.className = 'custom-info-window';
+    div.innerHTML = `<div class="title"></div><img src="" alt="预览图">`;
+    document.body.appendChild(div);
+    return div;
+}
+const infoWindow = createInfoWindow();
+let containerRect = null;
+
+function initMap() {
+    if (typeof AMap === 'undefined') return;
+    map = new AMap.Map('amap-container', {
+        zoom: 16,
+        center: tourData[currentSceneId].lnglat,
+        viewMode: '3D',
+        mapStyle: 'amap://styles/whitesmoke'
+    });
+    
+    map.on('complete', function(){
+        map.setFitView();
+        map.setCenter(tourData[currentSceneId].lnglat);
+        containerRect = document.getElementById('amap-container').getBoundingClientRect();
+    });
+
+    for (let key in tourData) {
+        const scene = tourData[key];
+        const markerDom = document.createElement('div');
+        markerDom.className = 'custom-marker';
+        markerDom.addEventListener('mouseenter', () => markerDom.style.transform = 'rotate(-45deg) scale(1.4)');
+        markerDom.addEventListener('mouseleave', () => markerDom.style.transform = 'rotate(-45deg) scale(1)');
+        
+        const marker = new AMap.Marker({
+            position: scene.lnglat,
+            content: markerDom,
+            offset: new AMap.Pixel(-12, -24),
+            map: map
+        });
+        
+        marker.on('mouseover', (e) => {
+            if (!containerRect) return;
+            infoWindow.querySelector('.title').textContent = scene.title;
+            infoWindow.querySelector('img').src = scene.previewImg || 'images/default.jpg';
+            infoWindow.classList.add('show');
+            const absX = e.pixel.x + containerRect.left;
+            const absY = e.pixel.y + containerRect.top;
+            infoWindow.style.left = absX + 'px';
+            infoWindow.style.top = absY + 'px';
+            
+            const moveHandler = (ev) => {
+                const moveAbsX = ev.pixel.x + containerRect.left;
+                const moveAbsY = ev.pixel.y + containerRect.top;
+                infoWindow.style.left = moveAbsX + 'px';
+                infoWindow.style.top = moveAbsY + 'px';
+            };
+            map.on('mousemove', moveHandler);
+            marker._moveHandler = moveHandler;
+        });
+        
+        marker.on('mouseout', () => {
+            infoWindow.classList.remove('show');
+            if (marker._moveHandler) {
+                map.off('mousemove', marker._moveHandler);
+                delete marker._moveHandler;
+            }
+        });
+        
+        marker.on('click', () => {
+            stopAutoTour();
+            loadScene(key);
+        });
+        markers[key] = { marker, dom: markerDom };
+    }
+    updateMapHighlight(currentSceneId);
+}
+
+function updateMapHighlight(id) {
+    for (let key in markers) {
+        if (markers[key] && markers[key].dom) {
+            markers[key].dom.classList.remove('active');
+        }
+    }
+    if (markers[id] && markers[id].dom) {
+        markers[id].dom.classList.add('active');
+    }
+}
+
+function renderVRHotspots(list) {
+    hotspotsContainer.innerHTML = '';
+    list.forEach(spot => {
+        const el = document.createElement('a-entity');
+        el.setAttribute('mixin', 'hotspot-mixin');
+        el.setAttribute('class', 'hotspot');
+        el.setAttribute('position', spot.position);
+        el.setAttribute('look-at', '#cam');
+        el.addEventListener('click', () => {
+            stopAutoTour();
+            loadScene(spot.targetScene);
+        });
+        hotspotsContainer.appendChild(el);
+    });
+}
+
+function openNavigation() {
+    const data = tourData[currentSceneId];
+    const [lng, lat] = data.lnglat;
+    const url = `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(data.title)}`;
+    window.open(url, '_blank');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    uiTitle.innerText = tourData[currentSceneId].title;
+    uiDesc.innerText = tourData[currentSceneId].description;
+});
+</script>
+</body>
+</html>
